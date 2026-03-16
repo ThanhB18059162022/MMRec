@@ -10,6 +10,6 @@ knn_k: 10
 
 learning_rate: 0.001
 
-cl_loss: [0.001,0.01,0.1]
+cl_loss: [0.01]
 
 hyper_parameters: ["cl_loss"]

@@ -1,11 +1,7 @@
 # coding: utf-8
 # @email: y463213402@gmail.com
 r"""
-MGCN
-################################################
-Reference:
-    https://github.com/demonph10/MGCN
-    ACM MM'2023: [Multi-View Graph Convolutional Network for Multimedia Recommendation]
+MGCN (đã chỉnh sửa: xử lý CPU/GPU an toàn, map_location khi torch.load, thay .cuda() bằng .to(self.device))
 """
 
 import os
@@ -22,6 +18,13 @@ from utils.utils import build_sim, compute_normalized_laplacian, build_knn_neigh
 class MGCN(GeneralRecommender):
     def __init__(self, config, dataset):
         super(MGCN, self).__init__(config, dataset)
+
+        # --- device handling: an toàn khi không có GPU ---
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if self.device.type == 'cpu':
+            print("Warning: CUDA not available, running on CPU.")
+        # --------------------------------------------------
+
         self.sparse = True
         self.cl_loss = config['cl_loss']
         self.n_ui_layers = config['n_ui_layers']
@@ -33,46 +36,62 @@ class MGCN(GeneralRecommender):
         # load dataset info
         self.interaction_matrix = dataset.inter_matrix(form='coo').astype(np.float32)
 
+        # embeddings / modules
         self.user_embedding = nn.Embedding(self.n_users, self.embedding_dim)
         self.item_id_embedding = nn.Embedding(self.n_items, self.embedding_dim)
         nn.init.xavier_uniform_(self.user_embedding.weight)
         nn.init.xavier_uniform_(self.item_id_embedding.weight)
 
+        # dataset files
         dataset_path = os.path.abspath(config['data_path'] + config['dataset'])
         image_adj_file = os.path.join(dataset_path, 'image_adj_{}_{}.pt'.format(self.knn_k, self.sparse))
         text_adj_file = os.path.join(dataset_path, 'text_adj_{}_{}.pt'.format(self.knn_k, self.sparse))
 
+        # adjacency matrices (sparse scipy -> torch sparse)
         self.norm_adj = self.get_adj_mat()
+        # convert and move to device safely
         self.R = self.sparse_mx_to_torch_sparse_tensor(self.R).float().to(self.device)
         self.norm_adj = self.sparse_mx_to_torch_sparse_tensor(self.norm_adj).float().to(self.device)
 
-
-        if self.v_feat is not None:
+        # Features: nếu có, tạo embedding từ pretrained features
+        # LƯU Ý: khi torch.load file chứa tensor được lưu trên GPU, dùng map_location để load về device hiện tại
+        if getattr(self, 'v_feat', None) is not None and self.v_feat is not None:
+            # pretrained visual features stored in self.v_feat (numpy or torch tensor)
             self.image_embedding = nn.Embedding.from_pretrained(self.v_feat, freeze=False)
             if os.path.exists(image_adj_file):
-                image_adj = torch.load(image_adj_file)
+                image_adj = torch.load(image_adj_file, map_location=self.device)
             else:
                 image_adj = build_sim(self.image_embedding.weight.detach())
                 image_adj = build_knn_normalized_graph(image_adj, topk=self.knn_k, is_sparse=self.sparse,
                                                        norm_type='sym')
                 torch.save(image_adj, image_adj_file)
-            self.image_original_adj = image_adj.cuda()
+            # đảm bảo type/tensor ở device phù hợp
+            if isinstance(image_adj, torch.Tensor):
+                self.image_original_adj = image_adj.to(self.device)
+            else:
+                # nếu image_adj là scipy sparse -> convert
+                self.image_original_adj = self.sparse_mx_to_torch_sparse_tensor(image_adj).float().to(self.device)
 
-        if self.t_feat is not None:
+        if getattr(self, 't_feat', None) is not None and self.t_feat is not None:
             self.text_embedding = nn.Embedding.from_pretrained(self.t_feat, freeze=False)
             if os.path.exists(text_adj_file):
-                text_adj = torch.load(text_adj_file)
+                text_adj = torch.load(text_adj_file, map_location=self.device)
             else:
                 text_adj = build_sim(self.text_embedding.weight.detach())
                 text_adj = build_knn_normalized_graph(text_adj, topk=self.knn_k, is_sparse=self.sparse, norm_type='sym')
                 torch.save(text_adj, text_adj_file)
-            self.text_original_adj = text_adj.cuda()
+            if isinstance(text_adj, torch.Tensor):
+                self.text_original_adj = text_adj.to(self.device)
+            else:
+                self.text_original_adj = self.sparse_mx_to_torch_sparse_tensor(text_adj).float().to(self.device)
 
-        if self.v_feat is not None:
+        # projection layers for features (move to device later)
+        if getattr(self, 'v_feat', None) is not None and self.v_feat is not None:
             self.image_trs = nn.Linear(self.v_feat.shape[1], self.embedding_dim)
-        if self.t_feat is not None:
+        if getattr(self, 't_feat', None) is not None and self.t_feat is not None:
             self.text_trs = nn.Linear(self.t_feat.shape[1], self.embedding_dim)
 
+        # other modules
         self.softmax = nn.Softmax(dim=-1)
 
         self.query_common = nn.Sequential(
@@ -103,6 +122,9 @@ class MGCN(GeneralRecommender):
 
         self.tau = 0.5
 
+        # Move model parameters to the chosen device (an toàn)
+        self.to(self.device)
+
     def pre_epoch_processing(self):
         pass
 
@@ -124,38 +146,41 @@ class MGCN(GeneralRecommender):
 
             norm_adj = d_mat_inv.dot(adj_mat)
             norm_adj = norm_adj.dot(d_mat_inv)
-            # norm_adj = adj.dot(d_mat_inv)
-            # print('generate single-normalized adjacency matrix.')
             return norm_adj.tocoo()
 
-        # norm_adj_mat = normalized_adj_single(adj_mat + sp.eye(adj_mat.shape[0]))
         norm_adj_mat = normalized_adj_single(adj_mat)
         norm_adj_mat = norm_adj_mat.tolil()
         self.R = norm_adj_mat[:self.n_users, self.n_users:]
-        # norm_adj_mat = normalized_adj_single(adj_mat + sp.eye(adj_mat.shape[0]))
         return norm_adj_mat.tocsr()
 
     def sparse_mx_to_torch_sparse_tensor(self, sparse_mx):
         """Convert a scipy sparse matrix to a torch sparse tensor."""
+        if isinstance(sparse_mx, torch.Tensor):
+            return sparse_mx.coalesce() if sparse_mx.is_sparse else sparse_mx
         sparse_mx = sparse_mx.tocoo().astype(np.float32)
         indices = torch.from_numpy(np.vstack((sparse_mx.row, sparse_mx.col)).astype(np.int64))
         values = torch.from_numpy(sparse_mx.data)
         shape = torch.Size(sparse_mx.shape)
-        return torch.sparse.FloatTensor(indices, values, shape)
+        tensor = torch.sparse.FloatTensor(indices, values, shape)
+        return tensor.coalesce()
 
     def forward(self, adj, train=False):
-        if self.v_feat is not None:
-            image_feats = self.image_trs(self.image_embedding.weight)
-        if self.t_feat is not None:
-            text_feats = self.text_trs(self.text_embedding.weight)
+        # ensure adj on same device
+        if isinstance(adj, torch.Tensor):
+            adj = adj.to(self.device)
+        # feature projections
+        if getattr(self, 'v_feat', None) is not None and self.v_feat is not None:
+            image_feats = self.image_trs(self.image_embedding.weight.to(self.device))
+        if getattr(self, 't_feat', None) is not None and self.t_feat is not None:
+            text_feats = self.text_trs(self.text_embedding.weight.to(self.device))
 
         # Behavior-Guided Purifier
-        image_item_embeds = torch.multiply(self.item_id_embedding.weight, self.gate_v(image_feats))
-        text_item_embeds = torch.multiply(self.item_id_embedding.weight, self.gate_t(text_feats))
+        image_item_embeds = torch.multiply(self.item_id_embedding.weight.to(self.device), self.gate_v(image_feats))
+        text_item_embeds = torch.multiply(self.item_id_embedding.weight.to(self.device), self.gate_t(text_feats))
 
         # User-Item View
-        item_embeds = self.item_id_embedding.weight
-        user_embeds = self.user_embedding.weight
+        item_embeds = self.item_id_embedding.weight.to(self.device)
+        user_embeds = self.user_embedding.weight.to(self.device)
         ego_embeddings = torch.cat([user_embeds, item_embeds], dim=0)
         all_embeddings = [ego_embeddings]
         for i in range(self.n_ui_layers):
@@ -167,22 +192,32 @@ class MGCN(GeneralRecommender):
         content_embeds = all_embeddings
 
         # Item-Item View
-        if self.sparse:
+        # image graph conv
+        if getattr(self, 'image_original_adj', None) is not None:
+            img_adj = self.image_original_adj.to(self.device) if isinstance(self.image_original_adj, torch.Tensor) else self.image_original_adj
             for i in range(self.n_layers):
-                image_item_embeds = torch.sparse.mm(self.image_original_adj, image_item_embeds)
+                if self.sparse:
+                    image_item_embeds = torch.sparse.mm(img_adj, image_item_embeds)
+                else:
+                    image_item_embeds = torch.mm(img_adj, image_item_embeds)
+            image_user_embeds = torch.sparse.mm(self.R, image_item_embeds)
+            image_embeds = torch.cat([image_user_embeds, image_item_embeds], dim=0)
         else:
+            # fallback: use item embeddings if no image graph
+            image_embeds = torch.cat([content_embeds[self.n_users:], content_embeds[self.n_users:]], dim=0)
+
+        # text graph conv
+        if getattr(self, 'text_original_adj', None) is not None:
+            txt_adj = self.text_original_adj.to(self.device) if isinstance(self.text_original_adj, torch.Tensor) else self.text_original_adj
             for i in range(self.n_layers):
-                image_item_embeds = torch.mm(self.image_original_adj, image_item_embeds)
-        image_user_embeds = torch.sparse.mm(self.R, image_item_embeds)
-        image_embeds = torch.cat([image_user_embeds, image_item_embeds], dim=0)
-        if self.sparse:
-            for i in range(self.n_layers):
-                text_item_embeds = torch.sparse.mm(self.text_original_adj, text_item_embeds)
+                if self.sparse:
+                    text_item_embeds = torch.sparse.mm(txt_adj, text_item_embeds)
+                else:
+                    text_item_embeds = torch.mm(txt_adj, text_item_embeds)
+            text_user_embeds = torch.sparse.mm(self.R, text_item_embeds)
+            text_embeds = torch.cat([text_user_embeds, text_item_embeds], dim=0)
         else:
-            for i in range(self.n_layers):
-                text_item_embeds = torch.mm(self.text_original_adj, text_item_embeds)
-        text_user_embeds = torch.sparse.mm(self.R, text_item_embeds)
-        text_embeds = torch.cat([text_user_embeds, text_item_embeds], dim=0)
+            text_embeds = torch.cat([content_embeds[self.n_users:], content_embeds[self.n_users:]], dim=0)
 
         # Behavior-Aware Fuser
         att_common = torch.cat([self.query_common(image_embeds), self.query_common(text_embeds)], dim=-1)

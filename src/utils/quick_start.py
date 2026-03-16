@@ -14,14 +14,20 @@ from utils.configurator import Config
 from utils.utils import init_seed, get_model, get_trainer, dict2str
 import platform
 import os
+import torch
 
 
 def quick_start(model, dataset, config_dict, save_model=True, mg=False):
     # merge config dict
     config = Config(model, dataset, config_dict, mg)
+
+    # --- Force CPU usage even if CUDA is available ---
+    config['device'] = torch.device('cpu')
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
     init_logger(config)
     logger = getLogger()
-    # print config infor
+    # print config info
     logger.info('██Server: \t' + platform.node())
     logger.info('██Dir: \t' + os.getcwd() + '\n')
     logger.info(config)
@@ -40,9 +46,10 @@ def quick_start(model, dataset, config_dict, save_model=True, mg=False):
     train_data = TrainDataLoader(config, train_dataset, batch_size=config['train_batch_size'], shuffle=True)
     (valid_data, test_data) = (
         EvalDataLoader(config, valid_dataset, additional_dataset=train_dataset, batch_size=config['eval_batch_size']),
-        EvalDataLoader(config, test_dataset, additional_dataset=train_dataset, batch_size=config['eval_batch_size']))
+        EvalDataLoader(config, test_dataset, additional_dataset=train_dataset, batch_size=config['eval_batch_size'])
+    )
 
-    ############ Dataset loadded, run model
+    ############ Dataset loaded, run model
     hyper_ret = []
     val_metric = config['valid_metric'].lower()
     best_test_value = 0.0
@@ -56,9 +63,11 @@ def quick_start(model, dataset, config_dict, save_model=True, mg=False):
         config['hyper_parameters'] = ['seed'] + config['hyper_parameters']
     for i in config['hyper_parameters']:
         hyper_ls.append(config[i] or [None])
+
     # combinations
     combinators = list(product(*hyper_ls))
     total_loops = len(combinators)
+
     for hyper_tuple in combinators:
         # random seed reset
         for j, k in zip(config['hyper_parameters'], hyper_tuple):
@@ -66,7 +75,7 @@ def quick_start(model, dataset, config_dict, save_model=True, mg=False):
         init_seed(config['seed'])
 
         logger.info('========={}/{}: Parameters:{}={}======='.format(
-            idx+1, total_loops, config['hyper_parameters'], hyper_tuple))
+            idx + 1, total_loops, config['hyper_parameters'], hyper_tuple))
 
         # set random state of dataloader
         train_data.pretrain_setup()
@@ -76,11 +85,26 @@ def quick_start(model, dataset, config_dict, save_model=True, mg=False):
 
         # trainer loading and initialization
         trainer = get_trainer()(config, model, mg)
-        # debug
+
         # model training
-        best_valid_score, best_valid_result, best_test_upon_valid = trainer.fit(train_data, valid_data=valid_data, test_data=test_data, saved=save_model)
+        best_valid_score, best_valid_result, best_test_upon_valid = trainer.fit(
+            train_data, valid_data=valid_data, test_data=test_data, saved=save_model
+        )
+
         #########
         hyper_ret.append((hyper_tuple, best_valid_result, best_test_upon_valid))
+
+        # === ✅ Save trained model manually to .pth file ===
+        save_dir = os.path.join(
+            config['checkpoint_dir'],
+            f"{config['model']}_{config['dataset']}_manual_save_{idx}.pth"
+        )
+        try:
+            os.makedirs(config['checkpoint_dir'], exist_ok=True)
+            torch.save(model.state_dict(), save_dir)
+            logger.info(f"✅ Model checkpoint saved to {save_dir}")
+        except Exception as e:
+            logger.error(f"⚠️ Failed to save model checkpoint: {e}")
 
         # save best test
         if best_test_upon_valid[val_metric] > best_test_value:
@@ -91,18 +115,23 @@ def quick_start(model, dataset, config_dict, save_model=True, mg=False):
         logger.info('best valid result: {}'.format(dict2str(best_valid_result)))
         logger.info('test result: {}'.format(dict2str(best_test_upon_valid)))
         logger.info('████Current BEST████:\nParameters: {}={},\n'
-                    'Valid: {},\nTest: {}\n\n\n'.format(config['hyper_parameters'],
-            hyper_ret[best_test_idx][0], dict2str(hyper_ret[best_test_idx][1]), dict2str(hyper_ret[best_test_idx][2])))
+                    'Valid: {},\nTest: {}\n\n\n'.format(
+                        config['hyper_parameters'],
+                        hyper_ret[best_test_idx][0],
+                        dict2str(hyper_ret[best_test_idx][1]),
+                        dict2str(hyper_ret[best_test_idx][2])
+                    ))
 
     # log info
     logger.info('\n============All Over=====================')
     for (p, k, v) in hyper_ret:
-        logger.info('Parameters: {}={},\n best valid: {},\n best test: {}'.format(config['hyper_parameters'],
-                                                                                  p, dict2str(k), dict2str(v)))
+        logger.info('Parameters: {}={},\n best valid: {},\n best test: {}'.format(
+            config['hyper_parameters'], p, dict2str(k), dict2str(v)))
 
     logger.info('\n\n█████████████ BEST ████████████████')
-    logger.info('\tParameters: {}={},\nValid: {},\nTest: {}\n\n'.format(config['hyper_parameters'],
-                                                                   hyper_ret[best_test_idx][0],
-                                                                   dict2str(hyper_ret[best_test_idx][1]),
-                                                                   dict2str(hyper_ret[best_test_idx][2])))
-
+    logger.info('\tParameters: {}={},\nValid: {},\nTest: {}\n\n'.format(
+        config['hyper_parameters'],
+        hyper_ret[best_test_idx][0],
+        dict2str(hyper_ret[best_test_idx][1]),
+        dict2str(hyper_ret[best_test_idx][2])
+    ))
