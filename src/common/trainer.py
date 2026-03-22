@@ -220,7 +220,7 @@ class Trainer(AbstractTrainer):
             train_loss_output += 'train loss: %.4f' % losses
         return train_loss_output + ']'
 
-    def fit(self, train_data, valid_data=None, test_data=None, saved=False, verbose=True):
+    def fit(self, train_data, valid_data=None, test_data=None, saved=True, verbose=True):
         r"""Train the model based on the train data and the valid data.
 
         Args:
