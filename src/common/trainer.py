@@ -107,7 +107,8 @@ class Trainer(AbstractTrainer):
         self.alpha1 = config['alpha1']
         self.alpha2 = config['alpha2']
         self.beta = config['beta']
-        self.checkpoint_path = os.path.join(self.config['checkpoint_dir'], f"{self.config['model']}_{self.config['dataset']}_checkpoint.pth")
+        self.latest_checkpoint_path = os.path.join(self.config['checkpoint_dir'], f"{self.config['model']}_{self.config['dataset']}_latest.pth")
+        self.best_checkpoint_path = os.path.join(self.config['checkpoint_dir'], f"{self.config['model']}_{self.config['dataset']}_best.pth")
 
     def _build_optimizer(self):
         r"""Init the Optimizer
@@ -235,16 +236,16 @@ class Trainer(AbstractTrainer):
         Returns:
              (float, dict): best valid score and best valid result. If valid_data is None, it returns (-1, None)
         """
-        if os.path.exists(self.checkpoint_path):
-            checkpoint = torch.load(self.checkpoint_path)
+        if os.path.exists(self.latest_checkpoint_path):
+            checkpoint = torch.load(self.latest_checkpoint_path)
             self.model.load_state_dict(checkpoint['model_state_dict'])
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            self.start_epoch = checkpoint['epoch'] + 1
-            self.best_valid_score = checkpoint['best_valid_score']
-            self.best_valid_result = checkpoint['best_valid_result']
-            self.best_test_upon_valid = checkpoint['best_test_upon_valid']
             self.lr_scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-            self.logger.info(f"Resumed from checkpoint at epoch {checkpoint['epoch']}")
+            self.start_epoch = checkpoint['epoch'] + 1
+            self.best_valid_score = checkpoint.get('best_valid_score', self.best_valid_score)
+            self.best_valid_result = checkpoint.get('best_valid_result', self.best_valid_result)
+            self.best_test_upon_valid = checkpoint.get('best_test_upon_valid', self.best_test_upon_valid)
+            self.logger.info(f"Resumed from latest checkpoint at epoch {checkpoint['epoch']}")
         for epoch_idx in range(self.start_epoch, self.epochs):
             # train
             training_start_time = time()
@@ -284,22 +285,35 @@ class Trainer(AbstractTrainer):
                     self.logger.info(valid_score_output)
                     self.logger.info(valid_result_output)
                     self.logger.info('test result: \n' + dict2str(test_result))
+                # persist latest state for resume in any case
+                torch.save({
+                    'epoch': epoch_idx,
+                    'model_state_dict': self.model.state_dict(),
+                    'optimizer_state_dict': self.optimizer.state_dict(),
+                    'scheduler_state_dict': self.lr_scheduler.state_dict(),
+                    'best_valid_score': self.best_valid_score,
+                    'best_valid_result': self.best_valid_result,
+                    'best_test_upon_valid': self.best_test_upon_valid
+                }, self.latest_checkpoint_path)
+                self.logger.info(f'Latest checkpoint saved to {self.latest_checkpoint_path}')
+
                 if update_flag:
                     update_output = '██ ' + self.config['model'] + '--Best validation results updated!!!'
                     if verbose:
                         self.logger.info(update_output)
                     self.best_valid_result = valid_result
                     self.best_test_upon_valid = test_result
-                    torch.save({
-                        'epoch': epoch_idx,
-                        'model_state_dict': self.model.state_dict(),
-                        'optimizer_state_dict': self.optimizer.state_dict(),
-                        'scheduler_state_dict': self.lr_scheduler.state_dict(),
-                        'best_valid_score': self.best_valid_score,
-                        'best_valid_result': self.best_valid_result,
-                        'best_test_upon_valid': self.best_test_upon_valid
-                    }, self.checkpoint_path)
-                    self.logger.info(f'Checkpoint saved to {self.checkpoint_path}')
+                    if saved:
+                        torch.save({
+                            'epoch': epoch_idx,
+                            'model_state_dict': self.model.state_dict(),
+                            'optimizer_state_dict': self.optimizer.state_dict(),
+                            'scheduler_state_dict': self.lr_scheduler.state_dict(),
+                            'best_valid_score': self.best_valid_score,
+                            'best_valid_result': self.best_valid_result,
+                            'best_test_upon_valid': self.best_test_upon_valid
+                        }, self.best_checkpoint_path)
+                        self.logger.info(f'Best checkpoint saved to {self.best_checkpoint_path}')
 
                 if stop_flag:
                     stop_output = '+++++Finished training, best eval result in epoch %d' % \
