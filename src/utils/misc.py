@@ -3,9 +3,7 @@
 """
 modified from UNITER
 """
-import json
 import random
-import sys
 
 import torch
 import numpy as np

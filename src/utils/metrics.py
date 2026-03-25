@@ -4,7 +4,6 @@
 ############################
 """
 
-from logging import getLogger
 
 import numpy as np
 

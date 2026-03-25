@@ -10,13 +10,12 @@ import itertools
 import torch
 import torch.optim as optim
 from torch.nn.utils.clip_grad import clip_grad_norm_
-import numpy as np
 import matplotlib.pyplot as plt
 
 from time import time
 from logging import getLogger
 
-from utils.utils import get_local_time, early_stopping, dict2str
+from utils.utils import early_stopping, dict2str
 from utils.topk_evaluator import TopKEvaluator
 
 

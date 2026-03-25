@@ -9,7 +9,6 @@ import re
 import os
 import yaml
 import torch
-from logging import getLogger
 
 
 class Config(object):

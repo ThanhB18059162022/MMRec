@@ -9,13 +9,8 @@ Data pre-processing
 ##########################
 """
 from logging import getLogger
-from collections import Counter
 import os
 import pandas as pd
-import numpy as np
-import torch
-from utils.data_utils import (ImageResize, ImagePad, image_to_tensor, load_decompress_img_from_lmdb_value)
-import lmdb
 
 
 class RecDataset(object):
