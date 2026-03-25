@@ -161,7 +161,7 @@ class SMORE(GeneralRecommender):
         adj_mat = adj_mat.todok()
 
         def normalized_adj_single(adj):
-            rowsum = np.array(adj.sum(1))
+            rowsum = np.array(adj.sum(1)) + 1e-9
 
             d_inv = np.power(rowsum, -0.5).flatten()
             d_inv[np.isinf(d_inv)] = 0.
