@@ -147,7 +147,7 @@ class SMORE(GeneralRecommender):
         combined_values_text[unique_idx[image_indices.size(1):]] = text_values
         combined_values, _ = torch.max(torch.stack((combined_values_image, combined_values_text)), dim=0)
 
-        fusion_adj = torch.sparse.FloatTensor(combined_indices, combined_values, image_adj.size()).coalesce()
+        fusion_adj = torch.sparse_coo_tensor(combined_indices, combined_values, image_adj.size(), dtype=torch.float32, device=combined_indices.device).coalesce()
 
         return fusion_adj
 
@@ -182,7 +182,7 @@ class SMORE(GeneralRecommender):
         indices = torch.from_numpy(np.vstack((sparse_mx.row, sparse_mx.col)).astype(np.int64))
         values = torch.from_numpy(sparse_mx.data)
         shape = torch.Size(sparse_mx.shape)
-        return torch.sparse.FloatTensor(indices, values, shape)
+        return torch.sparse_coo_tensor(indices, values, shape, dtype=torch.float32, device=values.device)
 
     def spectrum_convolution(self, image_embeds, text_embeds):
         """
