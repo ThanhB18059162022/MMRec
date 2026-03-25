@@ -107,8 +107,22 @@ class Trainer(AbstractTrainer):
         self.alpha1 = config['alpha1']
         self.alpha2 = config['alpha2']
         self.beta = config['beta']
-        self.latest_checkpoint_path = os.path.join(self.config['checkpoint_dir'], f"{self.config['model']}_{self.config['dataset']}_latest.pth")
-        self.best_checkpoint_path = os.path.join(self.config['checkpoint_dir'], f"{self.config['model']}_{self.config['dataset']}_best.pth")
+        # Lấy danh sách các hyper_parameters từ config (ví dụ: reg_weight, dropout_rate, ...)
+        hyper_params_str = ""
+        if 'hyper_parameters' in config and config['hyper_parameters']:
+            # Tạo chuỗi định danh dựa trên tên và giá trị của các tham số đang grid search
+            params = [f"{p}{config[p]}" for p in config['hyper_parameters'] if p in config]
+            hyper_params_str = "_" + "_".join(params)
+
+        self.latest_checkpoint_path = os.path.join(
+            self.config['checkpoint_dir'], 
+            f"{self.config['model']}_{self.config['dataset']}{hyper_params_str}_latest.pth"
+        )
+        self.best_checkpoint_path = os.path.join(
+            self.config['checkpoint_dir'], 
+            f"{self.config['model']}_{self.config['dataset']}{hyper_params_str}_best.pth"
+        )
+        # ------------------------------------------------------------------------------------------
 
     def _build_optimizer(self):
         r"""Init the Optimizer
