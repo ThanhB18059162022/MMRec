@@ -237,7 +237,7 @@ class Trainer(AbstractTrainer):
              (float, dict): best valid score and best valid result. If valid_data is None, it returns (-1, None)
         """
         if os.path.exists(self.latest_checkpoint_path):
-            checkpoint = torch.load(self.latest_checkpoint_path)
+            checkpoint = torch.load(self.latest_checkpoint_path, weights_only=False)
             self.model.load_state_dict(checkpoint['model_state_dict'])
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             self.lr_scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
