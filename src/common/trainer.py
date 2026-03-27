@@ -301,6 +301,8 @@ class Trainer(AbstractTrainer):
                 # persist latest state for resume in any case
                 torch.save({
                     'epoch': epoch_idx,
+                    'cur_step': self.cur_step,
+                    'config': self.config,
                     'model_state_dict': self.model.state_dict(),
                     'optimizer_state_dict': self.optimizer.state_dict(),
                     'scheduler_state_dict': self.lr_scheduler.state_dict(),
@@ -319,6 +321,8 @@ class Trainer(AbstractTrainer):
                     if saved:
                         torch.save({
                             'epoch': epoch_idx,
+                            'cur_step': self.cur_step,
+                            'config': self.config,
                             'model_state_dict': self.model.state_dict(),
                             'optimizer_state_dict': self.optimizer.state_dict(),
                             'scheduler_state_dict': self.lr_scheduler.state_dict(),
