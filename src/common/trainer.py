@@ -11,6 +11,7 @@ import torch
 import torch.optim as optim
 from torch.nn.utils.clip_grad import clip_grad_norm_
 import matplotlib.pyplot as plt
+from pickle import UnpicklingError
 
 from time import time
 from logging import getLogger
@@ -235,108 +236,90 @@ class Trainer(AbstractTrainer):
             train_loss_output += 'train loss: %.4f' % losses
         return train_loss_output + ']'
 
+    def _save_checkpoint(self, epoch_idx, path, is_best=False):
+        """Hàm lưu checkpoint an toàn (Atomic Save)"""
+        state = {
+            'epoch': epoch_idx,
+            'cur_step': self.cur_step,
+            'config': self.config,
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'scheduler_state_dict': self.lr_scheduler.state_dict(),
+            'best_valid_score': self.best_valid_score,
+            'best_valid_result': self.best_valid_result,
+            'best_test_upon_valid': self.best_test_upon_valid
+        }
+        temp_path = path + ".tmp"
+        try:
+            torch.save(state, temp_path)
+            os.replace(temp_path, path) # Chỉ đổi tên khi ghi thành công hoàn toàn
+            self.logger.info(f"{'Best' if is_best else 'Latest'} checkpoint saved to {path}")
+        except Exception as e:
+            self.logger.error(f"Lỗi khi lưu checkpoint: {e}")
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
     def fit(self, train_data, valid_data=None, test_data=None, saved=True, verbose=True):
-        r"""Train the model based on the train data and the valid data.
-
-        Args:
-            train_data (DataLoader): the train data
-            valid_data (DataLoader, optional): the valid data, default: None.
-                                               If it's None, the early_stopping is invalid.
-            test_data (DataLoader, optional): None
-            verbose (bool, optional): whether to write training and evaluation information to logger, default: True
-            saved (bool, optional): whether to save the model parameters, default: True
-
-        Returns:
-             (float, dict): best valid score and best valid result. If valid_data is None, it returns (-1, None)
-        """
+        # --- Khối nạp Checkpoint an toàn ---
         if os.path.exists(self.latest_checkpoint_path):
-            checkpoint = torch.load(self.latest_checkpoint_path, weights_only=False)
-            self.model.load_state_dict(checkpoint['model_state_dict'])
-            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            self.lr_scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-            self.start_epoch = checkpoint['epoch'] + 1
-            self.best_valid_score = checkpoint.get('best_valid_score', self.best_valid_score)
-            self.best_valid_result = checkpoint.get('best_valid_result', self.best_valid_result)
-            self.best_test_upon_valid = checkpoint.get('best_test_upon_valid', self.best_test_upon_valid)
-            self.logger.info(f"Resumed from latest checkpoint at epoch {checkpoint['epoch']}")
+            try:
+                if os.path.getsize(self.latest_checkpoint_path) == 0:
+                    raise EOFError("File checkpoint bị rỗng (0 bytes).")
+                
+                # Dùng weights_only=True để bảo mật và sạch log
+                checkpoint = torch.load(self.latest_checkpoint_path, map_location=self.device, weights_only=False)
+                
+                self.model.load_state_dict(checkpoint['model_state_dict'])
+                self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                self.lr_scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+                self.start_epoch = checkpoint['epoch'] + 1
+                self.cur_step = checkpoint.get('cur_step', 0)
+                self.best_valid_score = checkpoint.get('best_valid_score', self.best_valid_score)
+                self.best_valid_result = checkpoint.get('best_valid_result', self.best_valid_result)
+                self.best_test_upon_valid = checkpoint.get('best_test_upon_valid', self.best_test_upon_valid)
+                self.logger.info(f"Resumed from checkpoint: {self.latest_checkpoint_path} at epoch {checkpoint['epoch']}")
+            except (EOFError, UnpicklingError, RuntimeError, KeyError) as e:
+                self.logger.warning(f"Checkpoint bị lỗi ({e}). Tiến hành train mới từ Epoch 0.")
+        
         for epoch_idx in range(self.start_epoch, self.epochs):
-            # train
             training_start_time = time()
             self.model.pre_epoch_processing()
             train_loss, _ = self._train_epoch(train_data, epoch_idx)
-            if torch.is_tensor(train_loss):
-                # get nan loss
+            
+            if torch.is_tensor(train_loss) and torch.isnan(train_loss):
+                self.logger.info(f"Dừng sớm tại epoch {epoch_idx} do Loss là NaN.")
                 break
-            #for param_group in self.optimizer.param_groups:
-            #    print('======lr: ', param_group['lr'])
+
             self.lr_scheduler.step()
-
             self.train_loss_dict[epoch_idx] = sum(train_loss) if isinstance(train_loss, tuple) else train_loss
-            training_end_time = time()
-            train_loss_output = \
-                self._generate_train_loss_output(epoch_idx, training_start_time, training_end_time, train_loss)
-            post_info = self.model.post_epoch_processing()
+            
             if verbose:
-                self.logger.info(train_loss_output)
-                if post_info is not None:
-                    self.logger.info(post_info)
+                self.logger.info(self._generate_train_loss_output(epoch_idx, training_start_time, time(), train_loss))
 
-            # eval: To ensure the test result is the best model under validation data, set self.eval_step == 1
             if (epoch_idx + 1) % self.eval_step == 0:
-                valid_start_time = time()
                 valid_score, valid_result = self._valid_epoch(valid_data)
                 self.best_valid_score, self.cur_step, stop_flag, update_flag = early_stopping(
                     valid_score, self.best_valid_score, self.cur_step,
                     max_step=self.stopping_step, bigger=self.valid_metric_bigger)
-                valid_end_time = time()
-                valid_score_output = "epoch %d evaluating [time: %.2fs, valid_score: %f]" % \
-                                     (epoch_idx, valid_end_time - valid_start_time, valid_score)
-                valid_result_output = 'valid result: \n' + dict2str(valid_result)
-                # test
+                
                 _, test_result = self._valid_epoch(test_data)
+                
                 if verbose:
-                    self.logger.info(valid_score_output)
-                    self.logger.info(valid_result_output)
+                    self.logger.info(f"epoch {epoch_idx} valid_score: {valid_score:.6f}")
                     self.logger.info('test result: \n' + dict2str(test_result))
-                # persist latest state for resume in any case
-                torch.save({
-                    'epoch': epoch_idx,
-                    'cur_step': self.cur_step,
-                    'config': self.config,
-                    'model_state_dict': self.model.state_dict(),
-                    'optimizer_state_dict': self.optimizer.state_dict(),
-                    'scheduler_state_dict': self.lr_scheduler.state_dict(),
-                    'best_valid_score': self.best_valid_score,
-                    'best_valid_result': self.best_valid_result,
-                    'best_test_upon_valid': self.best_test_upon_valid
-                }, self.latest_checkpoint_path)
-                self.logger.info(f'Latest checkpoint saved to {self.latest_checkpoint_path}')
+
+                # Lưu latest liên tục để có thể resume
+                self._save_checkpoint(epoch_idx, self.latest_checkpoint_path)
 
                 if update_flag:
-                    update_output = '██ ' + self.config['model'] + '--Best validation results updated!!!'
-                    if verbose:
-                        self.logger.info(update_output)
+                    self.logger.info('██ Best validation updated!')
                     self.best_valid_result = valid_result
                     self.best_test_upon_valid = test_result
                     if saved:
-                        torch.save({
-                            'epoch': epoch_idx,
-                            'cur_step': self.cur_step,
-                            'config': self.config,
-                            'model_state_dict': self.model.state_dict(),
-                            'optimizer_state_dict': self.optimizer.state_dict(),
-                            'scheduler_state_dict': self.lr_scheduler.state_dict(),
-                            'best_valid_score': self.best_valid_score,
-                            'best_valid_result': self.best_valid_result,
-                            'best_test_upon_valid': self.best_test_upon_valid
-                        }, self.best_checkpoint_path)
-                        self.logger.info(f'Best checkpoint saved to {self.best_checkpoint_path}')
+                        self._save_checkpoint(epoch_idx, self.best_checkpoint_path, is_best=True)
 
                 if stop_flag:
-                    stop_output = '+++++Finished training, best eval result in epoch %d' % \
-                                  (epoch_idx - self.cur_step * self.eval_step)
-                    if verbose:
-                        self.logger.info(stop_output)
+                    self.logger.info(f'+++++ Early stopping tại epoch {epoch_idx}')
                     break
         return self.best_valid_score, self.best_valid_result, self.best_test_upon_valid
 
