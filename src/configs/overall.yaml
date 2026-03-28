@@ -19,7 +19,7 @@ req_training: True
 #embedding_size: 3780
 
 # training settings
-epochs: 1
+epochs: 100
 stopping_step: 20
 train_batch_size: 2048
 learner: adam
