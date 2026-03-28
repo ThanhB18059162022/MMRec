@@ -7,11 +7,11 @@ r"""
 
 import os
 import itertools
+from pickle import UnpicklingError
 import torch
 import torch.optim as optim
 from torch.nn.utils.clip_grad import clip_grad_norm_
 import matplotlib.pyplot as plt
-from pickle import UnpicklingError
 
 from time import time
 from logging import getLogger
@@ -31,31 +31,27 @@ class AbstractTrainer(object):
         self.model = model
 
     def fit(self, train_data):
-        r"""Train the model based on the train data.
-
-        """
-        raise NotImplementedError('Method [next] should be implemented.')
+        r"""Train the model based on the train data."""
+        raise NotImplementedError("Method [next] should be implemented.")
 
     def evaluate(self, eval_data):
-        r"""Evaluate the model based on the eval data.
+        r"""Evaluate the model based on the eval data."""
 
-        """
-
-        raise NotImplementedError('Method [next] should be implemented.')
+        raise NotImplementedError("Method [next] should be implemented.")
 
 
 class Trainer(AbstractTrainer):
     r"""The basic Trainer for basic training and evaluation strategies in recommender systems. This class defines common
-    functions for training and evaluation processes of most recommender system models, including fit(), evaluate(),
-   and some other features helpful for model training and evaluation.
+     functions for training and evaluation processes of most recommender system models, including fit(), evaluate(),
+    and some other features helpful for model training and evaluation.
 
-    Generally speaking, this class can serve most recommender system models, If the training process of the model is to
-    simply optimize a single loss without involving any complex training strategies, such as adversarial learning,
-    pre-training and so on.
+     Generally speaking, this class can serve most recommender system models, If the training process of the model is to
+     simply optimize a single loss without involving any complex training strategies, such as adversarial learning,
+     pre-training and so on.
 
-    Initializing the Trainer needs two parameters: `config` and `model`. `config` records the parameters information
-    for controlling training and evaluation, such as `learning_rate`, `epochs`, `eval_step` and so on.
-    More information can be found in [placeholder]. `model` is the instantiated object of a Model Class.
+     Initializing the Trainer needs two parameters: `config` and `model`. `config` records the parameters information
+     for controlling training and evaluation, such as `learning_rate`, `epochs`, `eval_step` and so on.
+     More information can be found in [placeholder]. `model` is the instantiated object of a Model Class.
 
     """
 
@@ -63,64 +59,66 @@ class Trainer(AbstractTrainer):
         super(Trainer, self).__init__(config, model)
 
         self.logger = getLogger()
-        self.learner = config['learner']
-        self.learning_rate = config['learning_rate']
-        self.epochs = config['epochs']
-        self.eval_step = min(config['eval_step'], self.epochs)
-        self.stopping_step = config['stopping_step']
-        self.clip_grad_norm = config['clip_grad_norm']
-        self.valid_metric = config['valid_metric'].lower()
-        self.valid_metric_bigger = config['valid_metric_bigger']
-        self.test_batch_size = config['eval_batch_size']
-        self.device = config['device']
+        self.learner = config["learner"]
+        self.learning_rate = config["learning_rate"]
+        self.epochs = config["epochs"]
+        self.eval_step = min(config["eval_step"], self.epochs)
+        self.stopping_step = config["stopping_step"]
+        self.clip_grad_norm = config["clip_grad_norm"]
+        self.valid_metric = config["valid_metric"].lower()
+        self.valid_metric_bigger = config["valid_metric_bigger"]
+        self.test_batch_size = config["eval_batch_size"]
+        self.device = config["device"]
         self.weight_decay = 0.0
-        if config['weight_decay'] is not None:
-            wd = config['weight_decay']
+        if config["weight_decay"] is not None:
+            wd = config["weight_decay"]
             self.weight_decay = eval(wd) if isinstance(wd, str) else wd
 
-        self.req_training = config['req_training']
+        self.req_training = config["req_training"]
 
         self.start_epoch = 0
         self.cur_step = 0
 
         tmp_dd = {}
-        for j, k in list(itertools.product(config['metrics'], config['topk'])):
-            tmp_dd[f'{j.lower()}@{k}'] = 0.0
+        for j, k in list(itertools.product(config["metrics"], config["topk"])):
+            tmp_dd[f"{j.lower()}@{k}"] = 0.0
         self.best_valid_score = -1
         self.best_valid_result = tmp_dd
         self.best_test_upon_valid = tmp_dd
         self.train_loss_dict = dict()
         self.optimizer = self._build_optimizer()
 
-        #fac = lambda epoch: 0.96 ** (epoch / 50)
-        lr_scheduler = config['learning_rate_scheduler']        # check zero?
+        # fac = lambda epoch: 0.96 ** (epoch / 50)
+        lr_scheduler = config["learning_rate_scheduler"]  # check zero?
         fac = lambda epoch: lr_scheduler[0] ** (epoch / lr_scheduler[1])
         scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=fac)
         self.lr_scheduler = scheduler
 
-        self.eval_type = config['eval_type']
+        self.eval_type = config["eval_type"]
         self.evaluator = TopKEvaluator(config)
 
         self.item_tensor = None
         self.tot_item_num = None
         self.mg = mg
-        self.alpha1 = config['alpha1']
-        self.alpha2 = config['alpha2']
-        self.beta = config['beta']
+        self.alpha1 = config["alpha1"]
+        self.alpha2 = config["alpha2"]
+        self.beta = config["beta"]
         # Lấy danh sách các hyper_parameters từ config (ví dụ: reg_weight, dropout_rate, ...)
         hyper_params_str = ""
-        if 'hyper_parameters' in config and config['hyper_parameters']:
+        if "hyper_parameters" in config and config["hyper_parameters"]:
             # Tạo chuỗi định danh dựa trên tên và giá trị của các tham số đang grid search
-            params = [f"{p}{config[p]}" for p in config['hyper_parameters'] if p in config]
+            params = [
+                f"{p}{config[p]}" for p in config["hyper_parameters"] if p in config
+            ]
             hyper_params_str = "_" + "_".join(params)
 
         self.latest_checkpoint_path = os.path.join(
-            self.config['checkpoint_dir'], 
-            f"{self.config['model']}_{self.config['dataset']}{hyper_params_str}_latest.pth"
+            self.config["checkpoint_dir"],
+            f"{self.config['model']}_{self.config['dataset']}{hyper_params_str}_latest.pth",
         )
         self.best_checkpoint_path = os.path.join(
-            self.config['checkpoint_dir'], 
-            f"{self.config['model']}_{self.config['dataset']}{hyper_params_str}_best.pth"
+            self.config["checkpoint_dir"],
+            f"{self.config['model']}_{self.config['dataset']}{hyper_params_str}_best.pth",
         )
         # ------------------------------------------------------------------------------------------
 
@@ -130,16 +128,34 @@ class Trainer(AbstractTrainer):
         Returns:
             torch.optim: the optimizer
         """
-        if self.learner.lower() == 'adam':
-            optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
-        elif self.learner.lower() == 'sgd':
-            optimizer = optim.SGD(self.model.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
-        elif self.learner.lower() == 'adagrad':
-            optimizer = optim.Adagrad(self.model.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
-        elif self.learner.lower() == 'rmsprop':
-            optimizer = optim.RMSprop(self.model.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
+        if self.learner.lower() == "adam":
+            optimizer = optim.Adam(
+                self.model.parameters(),
+                lr=self.learning_rate,
+                weight_decay=self.weight_decay,
+            )
+        elif self.learner.lower() == "sgd":
+            optimizer = optim.SGD(
+                self.model.parameters(),
+                lr=self.learning_rate,
+                weight_decay=self.weight_decay,
+            )
+        elif self.learner.lower() == "adagrad":
+            optimizer = optim.Adagrad(
+                self.model.parameters(),
+                lr=self.learning_rate,
+                weight_decay=self.weight_decay,
+            )
+        elif self.learner.lower() == "rmsprop":
+            optimizer = optim.RMSprop(
+                self.model.parameters(),
+                lr=self.learning_rate,
+                weight_decay=self.weight_decay,
+            )
         else:
-            self.logger.warning('Received unrecognized optimizer, set default Adam optimizer')
+            self.logger.warning(
+                "Received unrecognized optimizer, set default Adam optimizer"
+            )
             optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
         return optimizer
 
@@ -167,45 +183,59 @@ class Trainer(AbstractTrainer):
             self.optimizer.zero_grad()
             second_inter = interaction.clone()
             losses = loss_func(interaction)
-            
+
             if isinstance(losses, tuple):
                 loss = sum(losses)
                 loss_tuple = tuple(per_loss.item() for per_loss in losses)
-                total_loss = loss_tuple if total_loss is None else tuple(map(sum, zip(total_loss, loss_tuple)))
+                total_loss = (
+                    loss_tuple
+                    if total_loss is None
+                    else tuple(map(sum, zip(total_loss, loss_tuple)))
+                )
             else:
                 loss = losses
-                total_loss = losses.item() if total_loss is None else total_loss + losses.item()
+                total_loss = (
+                    losses.item() if total_loss is None else total_loss + losses.item()
+                )
             if self._check_nan(loss):
-                self.logger.info('Loss is nan at epoch: {}, batch index: {}. Exiting.'.format(epoch_idx, batch_idx))
+                self.logger.info(
+                    "Loss is nan at epoch: {}, batch index: {}. Exiting.".format(
+                        epoch_idx, batch_idx
+                    )
+                )
                 return loss, torch.tensor(0.0)
-            
+
             if self.mg and batch_idx % self.beta == 0:
                 first_loss = self.alpha1 * loss
                 first_loss.backward()
 
                 self.optimizer.step()
                 self.optimizer.zero_grad()
-                
+
                 losses = loss_func(second_inter)
                 if isinstance(losses, tuple):
                     loss = sum(losses)
                 else:
                     loss = losses
-                    
+
                 if self._check_nan(loss):
-                    self.logger.info('Loss is nan at epoch: {}, batch index: {}. Exiting.'.format(epoch_idx, batch_idx))
+                    self.logger.info(
+                        "Loss is nan at epoch: {}, batch index: {}. Exiting.".format(
+                            epoch_idx, batch_idx
+                        )
+                    )
                     return loss, torch.tensor(0.0)
                 second_loss = -1 * self.alpha2 * loss
                 second_loss.backward()
             else:
                 loss.backward()
-                
+
             if self.clip_grad_norm:
                 clip_grad_norm_(self.model.parameters(), **self.clip_grad_norm)
             self.optimizer.step()
             loss_batches.append(loss.detach())
             # for test
-            #if batch_idx == 0:
+            # if batch_idx == 0:
             #    break
         return total_loss, loss_batches
 
@@ -220,109 +250,152 @@ class Trainer(AbstractTrainer):
             dict: valid result
         """
         valid_result = self.evaluate(valid_data)
-        valid_score = valid_result[self.valid_metric] if self.valid_metric else valid_result['NDCG@20']
+        valid_score = (
+            valid_result[self.valid_metric]
+            if self.valid_metric
+            else valid_result["NDCG@20"]
+        )
         return valid_score, valid_result
 
     def _check_nan(self, loss):
         if torch.isnan(loss):
-            #raise ValueError('Training loss is nan')
+            # raise ValueError('Training loss is nan')
             return True
 
     def _generate_train_loss_output(self, epoch_idx, s_time, e_time, losses):
-        train_loss_output = 'epoch %d training [time: %.2fs, ' % (epoch_idx, e_time - s_time)
+        train_loss_output = "epoch %d training [time: %.2fs, " % (
+            epoch_idx,
+            e_time - s_time,
+        )
         if isinstance(losses, tuple):
-            train_loss_output = ', '.join('train_loss%d: %.4f' % (idx + 1, loss) for idx, loss in enumerate(losses))
+            train_loss_output = ", ".join(
+                "train_loss%d: %.4f" % (idx + 1, loss)
+                for idx, loss in enumerate(losses)
+            )
         else:
-            train_loss_output += 'train loss: %.4f' % losses
-        return train_loss_output + ']'
+            train_loss_output += "train loss: %.4f" % losses
+        return train_loss_output + "]"
 
     def _save_checkpoint(self, epoch_idx, path, is_best=False):
         """Hàm lưu checkpoint an toàn (Atomic Save)"""
         state = {
-            'epoch': epoch_idx,
-            'cur_step': self.cur_step,
-            'config': self.config,
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'scheduler_state_dict': self.lr_scheduler.state_dict(),
-            'best_valid_score': self.best_valid_score,
-            'best_valid_result': self.best_valid_result,
-            'best_test_upon_valid': self.best_test_upon_valid
+            "epoch": epoch_idx,
+            "cur_step": self.cur_step,
+            "config": self.config,
+            "model_state_dict": self.model.state_dict(),
+            "optimizer_state_dict": self.optimizer.state_dict(),
+            "scheduler_state_dict": self.lr_scheduler.state_dict(),
+            "best_valid_score": self.best_valid_score,
+            "best_valid_result": self.best_valid_result,
+            "best_test_upon_valid": self.best_test_upon_valid,
         }
         temp_path = path + ".tmp"
         try:
             torch.save(state, temp_path)
-            os.replace(temp_path, path) # Chỉ đổi tên khi ghi thành công hoàn toàn
-            self.logger.info(f"{'Best' if is_best else 'Latest'} checkpoint saved to {path}")
+            os.replace(temp_path, path)  # Chỉ đổi tên khi ghi thành công hoàn toàn
+            self.logger.info(
+                f"{'Best' if is_best else 'Latest'} checkpoint saved to {path}"
+            )
         except Exception as e:
             self.logger.error(f"Lỗi khi lưu checkpoint: {e}")
             if os.path.exists(temp_path):
                 os.remove(temp_path)
 
-    def fit(self, train_data, valid_data=None, test_data=None, saved=True, verbose=True):
+    def fit(
+        self, train_data, valid_data=None, test_data=None, saved=True, verbose=True
+    ):
         # --- Khối nạp Checkpoint an toàn ---
         if os.path.exists(self.latest_checkpoint_path):
             try:
                 if os.path.getsize(self.latest_checkpoint_path) == 0:
                     raise EOFError("File checkpoint bị rỗng (0 bytes).")
-                
+
                 # Dùng weights_only=True để bảo mật và sạch log
-                checkpoint = torch.load(self.latest_checkpoint_path, map_location=self.device, weights_only=False)
-                
-                self.model.load_state_dict(checkpoint['model_state_dict'])
-                self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-                self.lr_scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-                self.start_epoch = checkpoint['epoch'] + 1
-                self.cur_step = checkpoint.get('cur_step', 0)
-                self.best_valid_score = checkpoint.get('best_valid_score', self.best_valid_score)
-                self.best_valid_result = checkpoint.get('best_valid_result', self.best_valid_result)
-                self.best_test_upon_valid = checkpoint.get('best_test_upon_valid', self.best_test_upon_valid)
-                self.logger.info(f"Resumed from checkpoint: {self.latest_checkpoint_path} at epoch {checkpoint['epoch']}")
+                checkpoint = torch.load(
+                    self.latest_checkpoint_path,
+                    map_location=self.device,
+                    weights_only=False,
+                )
+
+                self.model.load_state_dict(checkpoint["model_state_dict"])
+                self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+                self.lr_scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+                self.start_epoch = checkpoint["epoch"] + 1
+                self.cur_step = checkpoint.get("cur_step", 0)
+                self.best_valid_score = checkpoint.get(
+                    "best_valid_score", self.best_valid_score
+                )
+                self.best_valid_result = checkpoint.get(
+                    "best_valid_result", self.best_valid_result
+                )
+                self.best_test_upon_valid = checkpoint.get(
+                    "best_test_upon_valid", self.best_test_upon_valid
+                )
+                self.logger.info(
+                    f"Resumed from checkpoint: {self.latest_checkpoint_path} at epoch {checkpoint['epoch']}"
+                )
             except (EOFError, UnpicklingError, RuntimeError, KeyError) as e:
-                self.logger.warning(f"Checkpoint bị lỗi ({e}). Tiến hành train mới từ Epoch 0.")
-        
+                self.logger.warning(
+                    f"Checkpoint bị lỗi ({e}). Tiến hành train mới từ Epoch 0."
+                )
+
         for epoch_idx in range(self.start_epoch, self.epochs):
             training_start_time = time()
             self.model.pre_epoch_processing()
             train_loss, _ = self._train_epoch(train_data, epoch_idx)
-            
+
             if torch.is_tensor(train_loss) and torch.isnan(train_loss):
                 self.logger.info(f"Dừng sớm tại epoch {epoch_idx} do Loss là NaN.")
                 break
 
             self.lr_scheduler.step()
-            self.train_loss_dict[epoch_idx] = sum(train_loss) if isinstance(train_loss, tuple) else train_loss
-            
+            self.train_loss_dict[epoch_idx] = (
+                sum(train_loss) if isinstance(train_loss, tuple) else train_loss
+            )
+
             if verbose:
-                self.logger.info(self._generate_train_loss_output(epoch_idx, training_start_time, time(), train_loss))
+                self.logger.info(
+                    self._generate_train_loss_output(
+                        epoch_idx, training_start_time, time(), train_loss
+                    )
+                )
 
             if (epoch_idx + 1) % self.eval_step == 0:
                 valid_score, valid_result = self._valid_epoch(valid_data)
-                self.best_valid_score, self.cur_step, stop_flag, update_flag = early_stopping(
-                    valid_score, self.best_valid_score, self.cur_step,
-                    max_step=self.stopping_step, bigger=self.valid_metric_bigger)
-                
+                self.best_valid_score, self.cur_step, stop_flag, update_flag = (
+                    early_stopping(
+                        valid_score,
+                        self.best_valid_score,
+                        self.cur_step,
+                        max_step=self.stopping_step,
+                        bigger=self.valid_metric_bigger,
+                    )
+                )
+
                 _, test_result = self._valid_epoch(test_data)
-                
+
                 if verbose:
-                    self.logger.info(f"epoch {epoch_idx} valid_score: {valid_score:.6f}")
-                    self.logger.info('test result: \n' + dict2str(test_result))
+                    self.logger.info(
+                        f"epoch {epoch_idx} valid_score: {valid_score:.6f}"
+                    )
+                    self.logger.info("test result: \n" + dict2str(test_result))
 
                 # Lưu latest liên tục để có thể resume
                 self._save_checkpoint(epoch_idx, self.latest_checkpoint_path)
 
                 if update_flag:
-                    self.logger.info('██ Best validation updated!')
+                    self.logger.info("██ Best validation updated!")
                     self.best_valid_result = valid_result
                     self.best_test_upon_valid = test_result
                     if saved:
-                        self._save_checkpoint(epoch_idx, self.best_checkpoint_path, is_best=True)
+                        self._save_checkpoint(
+                            epoch_idx, self.best_checkpoint_path, is_best=True
+                        )
 
                 if stop_flag:
-                    self.logger.info(f'+++++ Early stopping tại epoch {epoch_idx}')
+                    self.logger.info(f"+++++ Early stopping tại epoch {epoch_idx}")
                     break
         return self.best_valid_score, self.best_valid_result, self.best_test_upon_valid
-
 
     @torch.no_grad()
     def evaluate(self, eval_data, is_test=False, idx=0):
@@ -341,9 +414,13 @@ class Trainer(AbstractTrainer):
             # mask out pos items
             scores[masked_items[0], masked_items[1]] = -1e10
             # rank and get top-k
-            _, topk_index = torch.topk(scores, max(self.config['topk']), dim=-1)  # nusers x topk
+            _, topk_index = torch.topk(
+                scores, max(self.config["topk"]), dim=-1
+            )  # nusers x topk
             batch_matrix_list.append(topk_index)
-        return self.evaluator.evaluate(batch_matrix_list, eval_data, is_test=is_test, idx=idx)
+        return self.evaluator.evaluate(
+            batch_matrix_list, eval_data, is_test=is_test, idx=idx
+        )
 
     def plot_train_loss(self, show=True, save_path=None):
         r"""Plot the train loss in each epoch
@@ -358,10 +435,9 @@ class Trainer(AbstractTrainer):
         values = [float(self.train_loss_dict[epoch]) for epoch in epochs]
         plt.plot(epochs, values)
         plt.xticks(epochs)
-        plt.xlabel('Epoch')
-        plt.ylabel('Loss')
+        plt.xlabel("Epoch")
+        plt.ylabel("Loss")
         if show:
             plt.show()
         if save_path:
             plt.savefig(save_path)
-
