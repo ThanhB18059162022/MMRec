@@ -32,6 +32,7 @@ class SMORE(GeneralRecommender):
         self.text_knn_k = config['text_knn_k']
         self.dropout_rate = config['dropout_rate']
         self.dropout = nn.Dropout(p=self.dropout_rate)
+        self.temperature = config['temperature']
 
         self.interaction_matrix = dataset.inter_matrix(form='coo').astype(np.float32)
 
@@ -327,8 +328,8 @@ class SMORE(GeneralRecommender):
 
         side_embeds_users, side_embeds_items = torch.split(side_embeds, [self.n_users, self.n_items], dim=0)
         content_embeds_user, content_embeds_items = torch.split(content_embeds, [self.n_users, self.n_items], dim=0)
-        cl_loss = self.InfoNCE(side_embeds_items[pos_items], content_embeds_items[pos_items], 0.2) + self.InfoNCE(
-            side_embeds_users[users], content_embeds_user[users], 0.2)
+        cl_loss = self.InfoNCE(side_embeds_items[pos_items], content_embeds_items[pos_items], self.temperature) + self.InfoNCE(
+            side_embeds_users[users], content_embeds_user[users], self.temperature)
 
         return batch_mf_loss + batch_emb_loss + batch_reg_loss + self.cl_loss * cl_loss
 
