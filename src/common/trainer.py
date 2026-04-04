@@ -105,11 +105,15 @@ class Trainer(AbstractTrainer):
         self.beta = config["beta"]
         # Lấy danh sách các hyper_parameters từ config (ví dụ: reg_weight, dropout_rate, ...)
         hyper_params_str = ""
+        params = []
+        if "embedding_size" in config:
+            params.append(f"emb{config['embedding_size']}")
         if "hyper_parameters" in config and config["hyper_parameters"]:
             # Tạo chuỗi định danh dựa trên tên và giá trị của các tham số đang grid search
-            params = [
+            params.extend([
                 f"{p}{config[p]}" for p in config["hyper_parameters"] if p in config
-            ]
+            ])
+        if params:
             hyper_params_str = "_" + "_".join(params)
 
         self.latest_checkpoint_path = os.path.join(
