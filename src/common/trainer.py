@@ -108,11 +108,13 @@ class Trainer(AbstractTrainer):
         params = []
         if "embedding_size" in config:
             params.append(f"emb{config['embedding_size']}")
+        if "temperature" in config:
+            params.append(f"temp{config['temperature']}")
         if "hyper_parameters" in config and config["hyper_parameters"]:
             # Tạo chuỗi định danh dựa trên tên và giá trị của các tham số đang grid search
-            params.extend([
-                f"{p}{config[p]}" for p in config["hyper_parameters"] if p in config
-            ])
+            params.extend(
+                [f"{p}{config[p]}" for p in config["hyper_parameters"] if p in config]
+            )
         if params:
             hyper_params_str = "_" + "_".join(params)
 
