@@ -1,15 +1,15 @@
 embedding_size: 64
-n_ui_layers: [4]          
+n_ui_layers: [2, 3]          
 n_layers: 1
 
 learning_rate_scheduler: [0.96, 50]
-reg_weight: [1e-04]          
+reg_weight: [1e-5, 1e-4]          
 learning_rate: 0.001
 
 cl_loss: 0.01 
 temperature: 0.2
-image_knn_k: [40]        
-text_knn_k: [15]        
+image_knn_k: [10, 20]        
+text_knn_k: [10, 15]        
 dropout_rate: [0.1]          
 
 

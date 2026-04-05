@@ -8,8 +8,8 @@ learning_rate: 0.001
 
 cl_loss: 0.01 
 temperature: 0.2
-image_knn_k: [10, 20]        
-text_knn_k: [10, 15]        
+image_knn_k: [10, 15, 20]        
+text_knn_k: [5, 8, 10]        
 dropout_rate: [0.1]          
 
 
